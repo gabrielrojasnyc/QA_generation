@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Q&A Generator</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <style>
+        .chunk-container {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+        }
+        .qa-item {
+            border-left: 3px solid #0d6efd;
+            padding-left: 10px;
+            margin-bottom: 10px;
+        }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #0d6efd;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 2s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .api-key-container {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        #questionForm {
+            margin-bottom: 20px;
+        }
+        .stats-container {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .chart-container {
+            position: relative;
+            height: 200px;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+        .timing-card {
+            border-left: 3px solid #20c997;
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: #f8f9fa;
+        }
+        .token-card {
+            border-left: 3px solid #fd7e14;
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: #f8f9fa;
+        }
+        /* Added styles for retrieval comparison */
+        .comparison-result {
+            border-left: 4px solid #0d6efd;
+            padding: 8px;
+            margin-bottom: 12px;
+            background-color: #f8f9fa;
+        }
+        .csv-upload-container {
+            border: 1px dashed #ccc;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+        }
+        .method-header {
+            font-weight: bold;
+            padding: 5px;
+            margin-bottom: 10px;
+            background-color: #e9ecef;
+            border-radius: 3px;
+        }
+        .file-item {
+            padding: 8px;
+            margin-bottom: 5px;
+            background-color: #f8f9fa;
+            border-radius: 3px;
+            border-left: 3px solid #20c997;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="mb-4">PDF Q&A Generator</h1>
+        
+        <!-- Tab navigation -->
+        <ul class="nav nav-tabs mb-4" id="mainTab" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="pdf-tab" data-bs-toggle="tab" data-bs-target="#pdf-content" type="button" role="tab" aria-controls="pdf-content" aria-selected="true">PDF Processing</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="retrieval-tab" data-bs-toggle="tab" data-bs-target="#retrieval-content" type="button" role="tab" aria-controls="retrieval-content" aria-selected="false">Retrieval Comparison</button>
+            </li>
+        </ul>
+        
+        <!-- Tab content -->
+        <div class="tab-content" id="mainTabContent">
+            <!-- PDF Processing Tab -->
+            <div class="tab-pane fade show active" id="pdf-content" role="tabpanel" aria-labelledby="pdf-tab">
+                <div class="api-key-container">
+                    <h4>API Keys</h4>
+                    <div class="mb-3">
+                        <label for="openaiKey" class="form-label">OpenAI API Key</label>
+                        <input type="password" class="form-control" id="openaiKey" placeholder="sk-...">
+                    </div>
+                    <div class="mb-3">
+                        <label for="anthropicKey" class="form-label">Anthropic API Key</label>
+                        <input type="password" class="form-control" id="anthropicKey" placeholder="sk-ant-...">
+                    </div>
+                    <button id="saveKeys" class="btn btn-primary">Save Keys</button>
+                </div>
+                
+                <div class="card mb-4">
+                    <div class="card-header">Upload PDF and Select Model</div>
+                    <div class="card-body">
+                        <form id="uploadForm">
+                            <div class="mb-3">
+                                <label for="pdfFile" class="form-label">Select PDF File</label>
+                                <input type="file" class="form-control" id="pdfFile" accept=".pdf" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="modelSelect" class="form-label">Select Language Model</label>
+                                <select class="form-select" id="modelSelect" required>
+                                    {% for key, model in models.items() %}
+                                    <option value="{{ key }}">{{ model.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Process PDF</button>
+                        </form>
+                    </div>
+                </div>
+                
+                <div id="loadingContainer" style="display: none;">
+                    <div class="loader"></div>
+                    <p class="text-center">Processing PDF and generating Q&A pairs...</p>
+                </div>
+                
+                <div id="resultsContainer" style="display: none;">
+                    <div class="mb-4">
+                        <h3>Ask a Question</h3>
+                        <form id="questionForm">
+                            <div class="input-group mb-3">
+                                <input type="text" class="form-control" id="userQuestion" placeholder="Ask a question about the PDF...">
+                                <button class="btn btn-primary" type="submit">Ask</button>
+                            </div>
+                        </form>
+                        <div id="answerContainer" class="mb-3" style="display: none;">
+                            <h5>Answer:</h5>
+                            <div id="answerText" class="p-3 bg-light rounded"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Stats Dashboard -->
+                    <div id="statsContainer" class="stats-container mb-4" style="display: none;">
+                        <h3>Performance Metrics</h3>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="token-card">
+                                    <h5>Token Usage</h5>
+                                    <div class="chart-container">
+                                        <canvas id="tokenChart"></canvas>
+                                    </div>
+                                    <div id="tokenStats" class="small text-muted"></div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="timing-card">
+                                    <h5>Processing Times</h5>
+                                    <div class="chart-container">
+                                        <canvas id="timingChart"></canvas>
+                                    </div>
+                                    <div id="timingStats" class="small text-muted"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between mb-3">
+                        <h3>Generated Q&A Pairs</h3>
+                        <div>
+                            <button id="exportCsv" class="btn btn-success me-2">Export to CSV</button>
+                            <button id="exportWithStats" class="btn btn-outline-info">Export with Stats</button>
+                        </div>
+                    </div>
+                    
+                    <div id="chunksContainer"></div>
+                </div>
+            </div>
+            
+            <!-- Retrieval Comparison Tab -->
+            <div class="tab-pane fade" id="retrieval-content" role="tabpanel" aria-labelledby="retrieval-tab">
+                <div class="card mb-4">
+                    <div class="card-header">Compare Retrieval Methods</div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="csv-upload-container">
+                                    <h5>Upload CSV Files</h5>
+                                    <p>Upload 1-4 CSV files with QA pairs to compare different retrieval methods.</p>
+                                    <form id="csvUploadForm" enctype="multipart/form-data">
+                                        <div class="mb-3">
+                                            <label for="csvFiles" class="form-label">Select CSV Files</label>
+                                            <input type="file" class="form-control" id="csvFiles" name="csvFiles" multiple accept=".csv" required>
+                                            <div class="form-text">CSV files must contain 'question' and 'answer' columns.</div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="retrievalApiKey" class="form-label">OpenAI API Key (for embeddings)</label>
+                                            <input type="password" class="form-control" id="retrievalApiKey" name="retrievalApiKey" placeholder="sk-...">
+                                            <div class="form-text">Required for embedding-based and hybrid retrieval.</div>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">Upload Files</button>
+                                    </form>
+                                    <div id="csvUploadLoader" class="loader" style="display: none;"></div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div id="uploadedFilesContainer" style="display: none;">
+                                    <h5>Uploaded Files</h5>
+                                    <div id="filesList" class="mb-3"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="retrievalForm" style="display: none;">
+                            <hr>
+                            <h5>Test Query</h5>
+                            <div class="mb-3">
+                                <label for="queryInput" class="form-label">Enter a query to test retrieval methods</label>
+                                <input type="text" class="form-control" id="queryInput" placeholder="Enter your query...">
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="keywordCheckbox" checked>
+                                        <label class="form-check-label" for="keywordCheckbox">
+                                            Keyword Retrieval
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="embeddingCheckbox" checked>
+                                        <label class="form-check-label" for="embeddingCheckbox">
+                                            Embedding Retrieval
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="hybridCheckbox" checked>
+                                        <label class="form-check-label" for="hybridCheckbox">
+                                            Hybrid Retrieval
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <button id="compareButton" class="btn btn-primary">Compare Retrieval Methods</button>
+                            <div id="compareLoader" class="loader" style="display: none;"></div>
+                        </div>
+                        
+                        <div id="comparisonResults" style="display: none;">
+                            <hr>
+                            <h5>Retrieval Results</h5>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="method-header">Keyword-Based Retrieval</div>
+                                    <div id="keywordResults"></div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="method-header">Embedding-Based Retrieval</div>
+                                    <div id="embeddingResults"></div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="method-header">Hybrid Retrieval</div>
+                                    <div id="hybridResults"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                    <div class="input-group mb-3">
+                        <input type="text" class="form-control" id="userQuestion" placeholder="Ask a question about the PDF...">
+                        <button class="btn btn-primary" type="submit">Ask</button>
+                    </div>
+                </form>
+                <div id="answerContainer" class="mb-3" style="display: none;">
+                    <h5>Answer:</h5>
+                    <div id="answerText" class="p-3 bg-light rounded"></div>
+                </div>
+            </div>
+            
+            <!-- Stats Dashboard -->
+            <div id="statsContainer" class="stats-container mb-4" style="display: none;">
+                <h3>Performance Metrics</h3>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="token-card">
+                            <h5>Token Usage</h5>
+                            <div class="chart-container">
+                                <canvas id="tokenChart"></canvas>
+                            </div>
+                            <div id="tokenStats" class="small text-muted"></div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="timing-card">
+                            <h5>Processing Times</h5>
+                            <div class="chart-container">
+                                <canvas id="timingChart"></canvas>
+                            </div>
+                            <div id="timingStats" class="small text-muted"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="d-flex justify-content-between mb-3">
+                <h3>Generated Q&A Pairs</h3>
+                <div>
+                    <button id="exportCsv" class="btn btn-success me-2">Export to CSV</button>
+                    <button id="exportWithStats" class="btn btn-outline-info">Export with Stats</button>
+                </div>
+            </div>
+            
+            <div id="chunksContainer"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
+    <script>
+        // Store session IDs
+        let sessionId = null;
+        let comparisonId = null;
+        
+        // Check for saved API keys on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check for saved API keys in localStorage
+            const openaiKey = localStorage.getItem('openaiApiKey');
+            const anthropicKey = localStorage.getItem('anthropicApiKey');
+            
+            if (openaiKey) {
+                document.getElementById('openaiKey').value = openaiKey;
+            }
+            if (anthropicKey) {
+                document.getElementById('anthropicKey').value = anthropicKey;
+            }
+        });
+        
+        // Save API keys
+        document.getElementById('saveKeys').addEventListener('click', function() {
+            const openaiKey = document.getElementById('openaiKey').value.trim();
+            const anthropicKey = document.getElementById('anthropicKey').value.trim();
+            
+            if (openaiKey) {
+                localStorage.setItem('openaiApiKey', openaiKey);
+            }
+            if (anthropicKey) {
+                localStorage.setItem('anthropicApiKey', anthropicKey);
+            }
+            
+            alert('API keys saved locally in your browser.');
+        });
+        
+        // Upload form submission
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('pdfFile');
+            const modelSelect = document.getElementById('modelSelect');
+            
+            if (!fileInput.files.length) {
+                alert('Please select a PDF file.');
+                return;
+            }
+            
+            // Set API keys as environment variables
+            const openaiKey = document.getElementById('openaiKey').value.trim();
+            const anthropicKey = document.getElementById('anthropicKey').value.trim();
+            
+            // Check if keys are available based on selected model
+            const modelId = modelSelect.value;
+            if ((modelId === "1" || modelId === "2") && !openaiKey) {
+                alert('OpenAI API key is required for the selected model.');
+                return;
+            }
+            if ((modelId === "3" || modelId === "4") && !anthropicKey) {
+                alert('Anthropic API key is required for the selected model.');
+                return;
+            }
+            
+            // Prepare form data
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('model', modelSelect.value);
+            
+            // Show loading indicator
+            document.getElementById('loadingContainer').style.display = 'block';
+            document.getElementById('resultsContainer').style.display = 'none';
+            
+            // Send request to process PDF
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    sessionId = data.session_id;
+                    displayResults(data.display_data, data.stats);
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while processing the PDF.');
+            })
+            .finally(() => {
+                document.getElementById('loadingContainer').style.display = 'none';
+            });
+        });
+        
+        // Display results with statistics
+        function displayResults(displayData, stats) {
+            const container = document.getElementById('chunksContainer');
+            container.innerHTML = '';
+            
+            displayData.forEach(item => {
+                const chunkElement = document.createElement('div');
+                chunkElement.className = 'chunk-container';
+                
+                // Chunk text
+                const textElement = document.createElement('div');
+                textElement.className = 'mb-3';
+                textElement.innerHTML = `<strong>Chunk ${item.chunk_id + 1}:</strong> <span class="text-muted">${item.text}</span>`;
+                chunkElement.appendChild(textElement);
+                
+                // QA pairs for this chunk
+                const qaContainer = document.createElement('div');
+                qaContainer.className = 'mb-3';
+                qaContainer.id = `qa-container-${item.chunk_id}`;
+                
+                // Add QA pairs
+                qaContainer.innerHTML = '<h5>Q&A Pairs:</h5>';
+                item.qa_pairs.forEach(qa => {
+                    const qaElement = document.createElement('div');
+                    qaElement.className = 'qa-item mb-2';
+                    qaElement.innerHTML = `
+                        <div><strong>Q:</strong> ${qa.question}</div>
+                        <div><strong>A:</strong> ${qa.answer}</div>
+                    `;
+                    qaContainer.appendChild(qaElement);
+                });
+                
+                chunkElement.appendChild(qaContainer);
+                
+                // Regenerate button
+                const regenerateBtn = document.createElement('button');
+                regenerateBtn.className = 'btn btn-sm btn-outline-primary';
+                regenerateBtn.textContent = 'Regenerate Q&A';
+                regenerateBtn.dataset.chunkId = item.chunk_id;
+                regenerateBtn.addEventListener('click', handleRegenerateClick);
+                chunkElement.appendChild(regenerateBtn);
+                
+                container.appendChild(chunkElement);
+            });
+            
+            document.getElementById('resultsContainer').style.display = 'block';
+            
+            // Display statistics if available
+            if (stats) {
+                displayStats(stats);
+                document.getElementById('statsContainer').style.display = 'block';
+            }
+        }
+        
+        // Display statistics and charts
+        function displayStats(stats) {
+            // Display token stats
+            const tokenStats = document.getElementById('tokenStats');
+            tokenStats.innerHTML = `
+                <div>Total Input Tokens: ${stats.total_input_tokens}</div>
+                <div>Total Output Tokens: ${stats.total_output_tokens}</div>
+                <div>Total Tokens: ${stats.total_tokens}</div>
+                <div>Chunks: ${stats.chunks_count}</div>
+            `;
+            
+            // Display timing stats
+            const timingStats = document.getElementById('timingStats');
+            if (stats.timing) {
+                let timingHtml = '';
+                for (const [key, value] of Object.entries(stats.timing)) {
+                    if (key !== 'memory_usage_mb') {
+                        timingHtml += `<div>${key}: ${value.toFixed(2)}s</div>`;
+                    }
+                }
+                timingHtml += `<div>Memory Usage: ${stats.timing.memory_usage_mb.toFixed(2)} MB</div>`;
+                timingStats.innerHTML = timingHtml;
+            }
+            
+            // Create token usage chart
+            const tokenCtx = document.getElementById('tokenChart').getContext('2d');
+            new Chart(tokenCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Input Tokens', 'Output Tokens'],
+                    datasets: [{
+                        data: [stats.total_input_tokens, stats.total_output_tokens],
+                        backgroundColor: ['#fd7e14', '#20c997'],
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+            
+            // Create timing chart
+            if (stats.timing) {
+                const timingLabels = [];
+                const timingValues = [];
+                
+                for (const [key, value] of Object.entries(stats.timing)) {
+                    if (key !== 'memory_usage_mb' && key !== 'total') {
+                        timingLabels.push(key);
+                        timingValues.push(value);
+                    }
+                }
+                
+                const timingCtx = document.getElementById('timingChart').getContext('2d');
+                new Chart(timingCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: timingLabels,
+                        datasets: [{
+                            label: 'Time (seconds)',
+                            data: timingValues,
+                            backgroundColor: '#20c997',
+                            borderColor: '#198754',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        
+        // Handle regenerate button click
+        function handleRegenerateClick(e) {
+            const chunkId = e.target.dataset.chunkId;
+            const qaContainer = document.getElementById(`qa-container-${chunkId}`);
+            
+            // Disable button during processing
+            e.target.disabled = true;
+            e.target.textContent = 'Regenerating...';
+            
+            // Add a temporary loading indicator
+            qaContainer.innerHTML = '<div class="loader" style="width: 20px; height: 20px;"></div>';
+            
+            // Send request to regenerate QA
+            const formData = new FormData();
+            formData.append('session_id', sessionId);
+            formData.append('chunk_id', chunkId);
+            
+            fetch('/regenerate_qa', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Update QA pairs
+                    qaContainer.innerHTML = '<h5>Q&A Pairs:</h5>';
+                    data.qa_pairs.forEach(qa => {
+                        const qaElement = document.createElement('div');
+                        qaElement.className = 'qa-item mb-2';
+                        qaElement.innerHTML = `
+                            <div><strong>Q:</strong> ${qa.question}</div>
+                            <div><strong>A:</strong> ${qa.answer}</div>
+                        `;
+                        qaContainer.appendChild(qaElement);
+                    });
+                } else {
+                    alert('Error: ' + data.error);
+                    qaContainer.innerHTML = '<p class="text-danger">Failed to regenerate Q&A pairs.</p>';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while regenerating Q&A pairs.');
+                qaContainer.innerHTML = '<p class="text-danger">Failed to regenerate Q&A pairs.</p>';
+            })
+            .finally(() => {
+                // Re-enable button
+                e.target.disabled = false;
+                e.target.textContent = 'Regenerate Q&A';
+            });
+        }
+        
+        // Ask question form submission
+        document.getElementById('questionForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const questionInput = document.getElementById('userQuestion');
+            const question = questionInput.value.trim();
+            
+            if (!question) {
+                alert('Please enter a question.');
+                return;
+            }
+            
+            // Disable form during processing
+            const submitBtn = this.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Processing...';
+            
+            // Hide previous answer if any
+            document.getElementById('answerContainer').style.display = 'none';
+            
+            // Send request to ask question
+            const formData = new FormData();
+            formData.append('session_id', sessionId);
+            formData.append('question', question);
+            
+            fetch('/ask_question', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Display answer
+                    document.getElementById('answerText').textContent = data.answer;
+                    document.getElementById('answerContainer').style.display = 'block';
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while processing the question.');
+            })
+            .finally(() => {
+                // Re-enable form
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Ask';
+            });
+        });
+        
+        // Export to CSV (without stats)
+        document.getElementById('exportCsv').addEventListener('click', function() {
+            exportToCsv(false);
+        });
+        
+        // Export to CSV with stats
+        document.getElementById('exportWithStats').addEventListener('click', function() {
+            exportToCsv(true);
+        });
+        
+        // Export to CSV function
+        function exportToCsv(includeStats) {
+            if (!sessionId) {
+                alert('No session data available. Please process a PDF first.');
+                return;
+            }
+            
+            // Disable buttons during processing
+            const exportBtn = document.getElementById('exportCsv');
+            const exportWithStatsBtn = document.getElementById('exportWithStats');
+            exportBtn.disabled = true;
+            exportWithStatsBtn.disabled = true;
+            
+            if (includeStats) {
+                exportWithStatsBtn.textContent = 'Exporting...';
+            } else {
+                exportBtn.textContent = 'Exporting...';
+            }
+            
+            // Send request to export CSV
+            const formData = new FormData();
+            formData.append('session_id', sessionId);
+            formData.append('include_stats', includeStats);
+            
+            fetch('/export_csv', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Create download link
+                    const a = document.createElement('a');
+                    a.href = data.csv_url;
+                    a.download = 'qa_pairs.csv';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    
+                    // If timing stats available, show them
+                    if (data.timing) {
+                        console.log('CSV Export Timing:', data.timing);
+                    }
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while exporting to CSV.');
+            })
+            .finally(() => {
+                // Re-enable buttons
+                exportBtn.disabled = false;
+                exportWithStatsBtn.disabled = false;
+                exportBtn.textContent = 'Export to CSV';
+                exportWithStatsBtn.textContent = 'Export with Stats';
+            });
+        }
+        
+        // Retrieval Comparison Tab Functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add event listeners for the retrieval comparison tab
+            const csvUploadForm = document.getElementById('csvUploadForm');
+            const csvUploadLoader = document.getElementById('csvUploadLoader');
+            const uploadedFilesContainer = document.getElementById('uploadedFilesContainer');
+            const filesList = document.getElementById('filesList');
+            const retrievalForm = document.getElementById('retrievalForm');
+            const compareButton = document.getElementById('compareButton');
+            const compareLoader = document.getElementById('compareLoader');
+            const comparisonResults = document.getElementById('comparisonResults');
+            const keywordResults = document.getElementById('keywordResults');
+            const embeddingResults = document.getElementById('embeddingResults');
+            const hybridResults = document.getElementById('hybridResults');
+            
+            // CSV Upload for Comparison
+            csvUploadForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                // Show loader
+                csvUploadLoader.style.display = 'block';
+                
+                // Get form data
+                const formData = new FormData(csvUploadForm);
+                
+                // Get API key from localStorage if not provided
+                const retrievalApiKey = document.getElementById('retrievalApiKey').value.trim();
+                if (!retrievalApiKey && localStorage.getItem('openaiApiKey')) {
+                    formData.set('retrievalApiKey', localStorage.getItem('openaiApiKey'));
+                }
+                
+                // Upload CSV files
+                fetch('/upload_csv_for_comparison', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Hide loader
+                    csvUploadLoader.style.display = 'none';
+                    
+                    if (data.error) {
+                        alert('Error: ' + data.error);
+                        return;
+                    }
+                    
+                    // Store comparison ID
+                    comparisonId = data.comparison_id;
+                    
+                    // Display uploaded files
+                    uploadedFilesContainer.style.display = 'block';
+                    filesList.innerHTML = '';
+                    
+                    data.files.forEach(file => {
+                        const fileItem = document.createElement('div');
+                        fileItem.className = 'file-item';
+                        fileItem.innerHTML = `
+                            <strong>${file.filename}</strong><br>
+                            <small>Chunks: ${file.chunk_count} | QA Pairs: ${file.qa_count}</small>
+                        `;
+                        filesList.appendChild(fileItem);
+                    });
+                    
+                    // Show retrieval form
+                    retrievalForm.style.display = 'block';
+                    
+                    // Hide comparison results if previously shown
+                    comparisonResults.style.display = 'none';
+                })
+                .catch(error => {
+                    csvUploadLoader.style.display = 'none';
+                    alert('Error: ' + error);
+                });
+            });
+            
+            // Compare Retrieval Methods
+            compareButton.addEventListener('click', function() {
+                const query = document.getElementById('queryInput').value.trim();
+                
+                if (!query) {
+                    alert('Please enter a query.');
+                    return;
+                }
+                
+                // Get selected methods
+                const methods = [];
+                if (document.getElementById('keywordCheckbox').checked) methods.push('keyword');
+                if (document.getElementById('embeddingCheckbox').checked) methods.push('embedding');
+                if (document.getElementById('hybridCheckbox').checked) methods.push('hybrid');
+                
+                if (methods.length === 0) {
+                    alert('Please select at least one retrieval method.');
+                    return;
+                }
+                
+                // Show loader
+                compareLoader.style.display = 'block';
+                
+                // Get API key
+                const apiKey = document.getElementById('retrievalApiKey').value.trim() || localStorage.getItem('openaiApiKey');
+                
+                // Prepare request data
+                const requestData = {
+                    query: query,
+                    methods: methods,
+                    api_key: apiKey
+                };
+                
+                // Send request
+                fetch('/compare_retrieval_methods', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Hide loader
+                    compareLoader.style.display = 'none';
+                    
+                    if (data.error) {
+                        alert('Error: ' + data.error);
+                        return;
+                    }
+                    
+                    // Show comparison results
+                    comparisonResults.style.display = 'block';
+                    
+                    // Display results for each method
+                    keywordResults.innerHTML = '';
+                    embeddingResults.innerHTML = '';
+                    hybridResults.innerHTML = '';
+                    
+                    if (data.results.keyword) {
+                        displayMethodResults(keywordResults, data.results.keyword);
+                    } else if (methods.includes('keyword')) {
+                        keywordResults.innerHTML = '<p class="text-muted">No results found.</p>';
+                    }
+                    
+                    if (data.results.embedding) {
+                        displayMethodResults(embeddingResults, data.results.embedding);
+                    } else if (methods.includes('embedding')) {
+                        embeddingResults.innerHTML = '<p class="text-muted">No results found.</p>';
+                    }
+                    
+                    if (data.results.hybrid) {
+                        displayMethodResults(hybridResults, data.results.hybrid);
+                    } else if (methods.includes('hybrid')) {
+                        hybridResults.innerHTML = '<p class="text-muted">No results found.</p>';
+                    }
+                    
+                    if (data.results.error) {
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'alert alert-warning';
+                        errorDiv.textContent = 'Error with embedding methods: ' + data.results.error;
+                        document.querySelector('#comparisonResults .row').prepend(errorDiv);
+                    }
+                })
+                .catch(error => {
+                    compareLoader.style.display = 'none';
+                    alert('Error: ' + error);
+                });
+            });
+            
+            // Display results for a method
+            function displayMethodResults(container, results) {
+                if (!results || results.length === 0) {
+                    container.innerHTML = '<p class="text-muted">No results found.</p>';
+                    return;
+                }
+                
+                results.forEach((result, index) => {
+                    const resultDiv = document.createElement('div');
+                    resultDiv.className = 'comparison-result';
+                    
+                    // Extract QA from the result text (format: "Q: ... A: ...")
+                    let questionText = '';
+                    let answerText = '';
+                    
+                    if (result.text.includes('Q:') && result.text.includes('A:')) {
+                        const parts = result.text.split('A:');
+                        if (parts.length >= 2) {
+                            questionText = parts[0].replace('Q:', '').trim();
+                            answerText = parts[1].trim();
+                        }
+                    }
+                    
+                    resultDiv.innerHTML = `
+                        <div class="mb-1"><strong>#${index + 1} (Score: ${result.score.toFixed(4)})</strong></div>
+                        ${questionText ? `<div class="mb-1"><strong>Q:</strong> ${truncateText(questionText, 150)}</div>` : ''}
+                        ${answerText ? `<div><strong>A:</strong> ${truncateText(answerText, 150)}</div>` : ''}
+                        ${!questionText && !answerText ? `<div>${truncateText(result.text, 200)}</div>` : ''}
+                    `;
+                    
+                    container.appendChild(resultDiv);
+                });
+            }
+            
+            // Helper function to truncate text
+            function truncateText(text, maxLength) {
+                if (!text) return '';
+                if (text.length <= maxLength) return text;
+                return text.substring(0, maxLength) + '...';
+            }
+        });
+    </script>
+</body>
+</html>
