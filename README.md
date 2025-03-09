@@ -1,5 +1,10 @@
 # PDF Q&A System
 
+
+https://github.com/user-attachments/assets/0cda34c0-f659-4642-89a0-4e049c419031
+
+
+
 A Python application that implements a PDF text chunking and question-answering (Q&A) system with a web interface.
 
 ## Features
